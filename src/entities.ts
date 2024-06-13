@@ -1,5 +1,12 @@
-import { GameObj, KaboomCtx } from "kaboom";
+import { AreaComp, BodyComp, DoubleJumpComp, GameObj, HealthComp, KaboomCtx, OpacityComp, PosComp, ScaleComp, SpriteComp } from "kaboom";
 import { scale } from "./constants";
+
+type PlayerGameObj = GameObj<SpriteComp & AreaComp & BodyComp & PosComp & ScaleComp & DoubleJumpComp & HealthComp & OpacityComp & {
+    speed: number;
+    direction: string;
+    isInhaling: boolean;
+    isFull: boolean;
+}>;
 
 export function makePlayer(k: KaboomCtx, posX: number, posY: number) {
     const player = k.make([
@@ -91,4 +98,138 @@ export function makePlayer(k: KaboomCtx, posX: number, posY: number) {
     });
 
     return player;
+}
+
+export function setControls(k: KaboomCtx, player: PlayerGameObj) {
+    const inhaleEffectRef = k.get("inhaleEffect")[0];
+
+    k.onKeyDown((key) => {
+        switch (key) {
+            case "left":
+                player.direction = "left";
+                player.flipX = true;
+                player.move(-player.speed, 0);
+                break;
+            case "right":
+                player.direction = "right";
+                player.flipX = false;
+                player.move(player.speed, 0);
+                break;
+            case "z":
+                if (player.isFull) {
+                    player.play("kirbFull");
+                    inhaleEffectRef.opacity = 0;
+                }
+                else {
+                    player.isInhaling = true;
+                    player.play("kirbInhaling");
+                    inhaleEffectRef.opacity = 1;
+                }
+
+                break;
+            default:
+        }
+    });
+
+    k.onKeyPress((key) => {
+        switch (key) {
+            case "x":
+                player.doubleJump();
+                break;
+            default:
+        }
+    });
+
+    k.onKeyRelease((key) => {
+        if (key === "z") {
+            if (player.isFull) {
+                player.play("kirbInhaling");
+
+                const shootingStar = k.add([
+                    k.sprite("assets", {
+                        anim: "shootingStar",
+                        flipX: player.direction === "right",
+                    }),
+                    k.area({ shape: new k.Rect(k.vec2(5, 4), 6, 6) }),
+                    k.pos(
+                        player.direction === "left" ? player.pos.x - 80 : player.pos.x + 80, player.pos.y + 5
+                    ),
+                    k.scale(scale),
+                    k.move(player.direction === "left" ? k.LEFT : k.RIGHT, 800),
+                    "shootingStar",
+                ]);
+                shootingStar.onCollide("platform", () => k.destroy(shootingStar));
+
+                player.isFull = false;
+                k.wait(1, () => player.play("kirbIdle"));
+                return;
+            }
+
+            inhaleEffectRef.opacity = 0;
+            player.isInhaling = false;
+            player.play("kirbIdle");
+        }
+    });
+}
+
+export function makeInhalable(k: KaboomCtx, enemy: GameObj) {
+    enemy.onCollide("inhaleZone", () => {
+        enemy.isInhalable = true;
+    });
+
+    enemy.onCollideEnd("inhaleZone", () => {
+        enemy.isInhalable = false;
+    });
+
+    enemy.onCollide("shootingStar", (shootingStar: GameObj) => {
+        k.destroy(enemy);
+        k.destroy(shootingStar);
+    });
+
+    const playerRef = k.get("player")[0];
+
+    enemy.onUpdate(() => {
+        if (playerRef.isInhaling && enemy.isInhalable) {
+            if (playerRef.direction === "right") {
+                enemy.move(-800, 0);
+            }
+            else {
+                enemy.move(800, 0);
+            }
+        }
+    })
+}
+
+export function makeFlameEnemy(k: KaboomCtx, posX: number, posY: number) {
+    const flame = k.add([
+        k.sprite("assets", { anim: "flame" }),
+        k.scale(scale),
+        k.pos(posX * scale, posY * scale),
+        k.area({
+            shape: new k.Rect(k.vec2(4, 6), 8, 10),
+            collisionIgnore: ["enemy"],
+        }),
+        k.body(),
+        k.state("idle", ["idle", "jump"]),
+        "enemy",
+    ]);
+
+    makeInhalable(k, flame);
+
+    flame.onStateEnter("idle", async () => {
+        await k.wait(1);
+        flame.enterState("jump");
+    });
+
+    flame.onStateEnter("jump", async () => {
+        flame.jump(1000);
+    });
+
+    flame.onStateUpdate("jump", async () => {
+        if (flame.isGrounded()) {
+            flame.enterState("idle");
+        }
+    });
+
+    return flame;
 }
