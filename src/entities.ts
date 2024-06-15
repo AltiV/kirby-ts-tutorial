@@ -5,6 +5,7 @@ type PlayerGameObj = GameObj<SpriteComp & AreaComp & BodyComp & PosComp & ScaleC
     speed: number;
     direction: string;
     isInhaling: boolean;
+    isExhaling: boolean;
     isFull: boolean;
 }>;
 
@@ -22,6 +23,7 @@ export function makePlayer(k: KaboomCtx, posX: number, posY: number) {
             speed: 300,
             direction: "right",
             isInhaling: false,
+            isExhaling: false,
             isFull: false
         },
         "player",
@@ -120,7 +122,7 @@ export function setControls(k: KaboomCtx, player: PlayerGameObj) {
                     player.play("kirbFull");
                     inhaleEffectRef.opacity = 0;
                 }
-                else {
+                else if (!player.isExhaling) {
                     player.isInhaling = true;
                     player.play("kirbInhaling");
                     inhaleEffectRef.opacity = 1;
@@ -133,6 +135,38 @@ export function setControls(k: KaboomCtx, player: PlayerGameObj) {
 
     k.onKeyPress((key) => {
         switch (key) {
+            case "z":
+                if (player.isFull) {
+                    player.isExhaling = true;
+                    player.play("kirbInhaling");
+
+                    const shootingStar = k.add([
+                        k.sprite("assets", {
+                            anim: "shootingStar",
+                            flipX: player.direction === "right",
+                        }),
+                        k.area({ shape: new k.Rect(k.vec2(5, 4), 6, 6) }),
+                        k.pos(
+                            player.direction === "left" ? player.pos.x - 80 : player.pos.x + 80, player.pos.y + 5
+                        ),
+                        k.scale(scale),
+                        k.move(player.direction === "left" ? k.LEFT : k.RIGHT, 800),
+                        "shootingStar",
+                    ]);
+                    shootingStar.onCollide("platform", () => k.destroy(shootingStar));
+
+                    player.isFull = false;
+                    k.wait(0.5, () => {
+                        player.play("kirbIdle");
+                        player.isExhaling = false;
+                    });
+                    return;
+                }
+
+                inhaleEffectRef.opacity = 0;
+                player.isInhaling = false;
+                player.play("kirbIdle");
+                break;
             case "x":
                 player.doubleJump();
                 break;
@@ -142,32 +176,12 @@ export function setControls(k: KaboomCtx, player: PlayerGameObj) {
 
     k.onKeyRelease((key) => {
         if (key === "z") {
-            if (player.isFull) {
-                player.play("kirbInhaling");
-
-                const shootingStar = k.add([
-                    k.sprite("assets", {
-                        anim: "shootingStar",
-                        flipX: player.direction === "right",
-                    }),
-                    k.area({ shape: new k.Rect(k.vec2(5, 4), 6, 6) }),
-                    k.pos(
-                        player.direction === "left" ? player.pos.x - 80 : player.pos.x + 80, player.pos.y + 5
-                    ),
-                    k.scale(scale),
-                    k.move(player.direction === "left" ? k.LEFT : k.RIGHT, 800),
-                    "shootingStar",
-                ]);
-                shootingStar.onCollide("platform", () => k.destroy(shootingStar));
-
-                player.isFull = false;
-                k.wait(1, () => player.play("kirbIdle"));
-                return;
-            }
-
             inhaleEffectRef.opacity = 0;
             player.isInhaling = false;
-            player.play("kirbIdle");
+
+            if (!player.isFull && !player.isExhaling) {
+                player.play("kirbIdle");
+            }
         }
     });
 }
@@ -232,4 +246,70 @@ export function makeFlameEnemy(k: KaboomCtx, posX: number, posY: number) {
     });
 
     return flame;
+}
+
+export function makeGuyEnemy(k: KaboomCtx, posX: number, posY: number) {
+    const guy = k.add([
+        k.sprite("assets", { anim: "guyWalk" }),
+        k.scale(scale),
+        k.pos(posX * scale, posY * scale),
+        k.area({
+            shape: new k.Rect(k.vec2(4, 6), 8, 10),
+            collisionIgnore: ["enemy"],
+        }),
+        k.body(),
+        k.state("idle", ["idle", "left", "right"]),
+        { isInhalable: false, speed: 100 },
+        "enemy",
+    ]);
+
+    makeInhalable(k, guy);
+
+    guy.onStateEnter("idle", async () => {
+        await k.wait(1);
+        guy.enterState("left");
+    });
+
+    guy.onStateEnter("left", async () => {
+        guy.flipX = false;
+        await k.wait(2);
+        guy.enterState("right");
+    });
+
+    guy.onStateUpdate("left", async () => {
+        guy.move(-guy.speed, 0);
+    });
+
+    guy.onStateEnter("right", async () => {
+        guy.flipX = true;
+        await k.wait(2);
+        guy.enterState("left");
+    });
+
+    guy.onStateUpdate("right", async () => {
+        guy.move(guy.speed, 0);
+    });
+
+    return guy;
+}
+
+export function makeBirdEnemy(k: KaboomCtx, posX: number, posY: number, speed: number) {
+    const bird = k.add([
+        k.sprite("assets", { anim: "bird" }),
+        k.scale(scale),
+        k.pos(posX * scale, posY * scale),
+        k.area({
+            shape: new k.Rect(k.vec2(4, 6), 8, 10),
+            collisionIgnore: ["enemy"],
+        }),
+        // Prevents gravity from affecting movement
+        k.body({ isStatic: true }),
+        k.move(k.LEFT, speed),
+        k.offscreen({ destroy: true, distance: 400 }),
+        "enemy",
+    ]);
+
+    makeInhalable(k, bird);
+
+    return bird;
 }
